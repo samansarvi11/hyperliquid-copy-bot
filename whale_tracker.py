@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sqlite3
+import traceback
 from collections import deque
 from decimal import Decimal, InvalidOperation
 from contextlib import contextmanager
@@ -1816,6 +1817,7 @@ async def fetch_bbo_snapshots(markets):
     for dex, coin in markets:
         dexes_by_coin.setdefault(coin, set()).add(dex)
     snapshots = {}
+    websocket_started_at = time()
     async with websockets.connect(
         WS_URL, ping_interval=20, ping_timeout=20, close_timeout=10,
         max_size=None,
@@ -2010,29 +2012,44 @@ async def monitor_once(db=None):
         with db.transaction():
             db.save_paper_state(paper_trader)
 
-        async for raw_message in ws:
-            try:
-                message = json.loads(raw_message)
-            except json.JSONDecodeError:
-                print("WEBSOCKET ERROR: received invalid JSON")
-                continue
+        try:
+            async for raw_message in ws:
+                try:
+                    message = json.loads(raw_message)
+                except json.JSONDecodeError:
+                    print("WEBSOCKET ERROR: received invalid JSON")
+                    continue
 
-            channel = message.get("channel")
-            if channel == "subscriptionResponse":
-                print("userFills subscription acknowledged.")
-            elif channel == "error":
-                print(f"WEBSOCKET SUBSCRIPTION ERROR: {message.get('data')}")
-            elif channel == "userFills":
-                latest = apply_fills(
-                    process_user_fills_message(message),
-                    positions,
-                    recent_fills,
-                    market_dexes,
-                    paper_trader,
-                    db,
-                )
-                watermark = max(watermark, latest)
-                checkpoint_time = max(checkpoint_time, watermark)
+                channel = message.get("channel")
+                if channel == "subscriptionResponse":
+                    print("userFills subscription acknowledged.")
+                elif channel == "error":
+                    print(f"WEBSOCKET SUBSCRIPTION ERROR: {message.get('data')}")
+                elif channel == "userFills":
+                    latest = apply_fills(
+                        process_user_fills_message(message),
+                        positions,
+                        recent_fills,
+                        market_dexes,
+                        paper_trader,
+                        db,
+                    )
+                    watermark = max(watermark, latest)
+                    checkpoint_time = max(checkpoint_time, watermark)
+        except Exception as error:
+            print("WEBSOCKET DIAGNOSTIC EXCEPTION")
+            print(type(error).__name__)
+            print(str(error))
+            print(traceback.format_exc())
+            raise
+        else:
+            print("WEBSOCKET DIAGNOSTIC CLOSE")
+            print(f"close_code={getattr(ws, 'close_code', None)!r}")
+            print(f"close_reason={getattr(ws, 'close_reason', None)!r}")
+            print(f"state={getattr(ws, 'state', None)!r}")
+            print(f"closed={getattr(ws, 'closed', None)!r}")
+            print(f"connected_at={websocket_started_at!r}")
+            print(f"lifetime={time() - websocket_started_at:.3f}")
 async def main():
     db = TrackerDatabase()
     while True:

@@ -1884,11 +1884,18 @@ async def monitor_once(db=None):
 
     async with websockets.connect(
         WS_URL,
-        ping_interval=20,
-        ping_timeout=20,
+        ping_interval=None,
+        ping_timeout=None,
         close_timeout=10,
         max_size=None,
     ) as ws:
+        async def hyperliquid_heartbeat():
+            while True:
+                await asyncio.sleep(15)
+                await ws.send(json.dumps({"method": "ping"}))
+
+        heartbeat_task = asyncio.create_task(hyperliquid_heartbeat())
+
         await ws.send(json.dumps(payload))
         print("WebSocket connected; userFills subscription sent.")
         snapshot_fills = []
@@ -2033,6 +2040,12 @@ async def monitor_once(db=None):
                 )
                 watermark = max(watermark, latest)
                 checkpoint_time = max(checkpoint_time, watermark)
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
 async def main():
     db = TrackerDatabase()
     while True:

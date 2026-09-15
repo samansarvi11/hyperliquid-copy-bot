@@ -2017,31 +2017,32 @@ async def monitor_once(db=None):
         with db.transaction():
             db.save_paper_state(paper_trader)
 
-        async for raw_message in ws:
-            try:
-                message = json.loads(raw_message)
-            except json.JSONDecodeError:
-                print("WEBSOCKET ERROR: received invalid JSON")
-                continue
+        try:
+            async for raw_message in ws:
+                try:
+                    message = json.loads(raw_message)
+                except json.JSONDecodeError:
+                    print("WEBSOCKET ERROR: received invalid JSON")
+                    continue
 
-            channel = message.get("channel")
-            if channel == "subscriptionResponse":
-                print("userFills subscription acknowledged.")
-            elif channel == "error":
-                print(f"WEBSOCKET SUBSCRIPTION ERROR: {message.get('data')}")
-            elif channel == "userFills":
-                latest = apply_fills(
-                    process_user_fills_message(message),
-                    positions,
-                    recent_fills,
-                    market_dexes,
-                    paper_trader,
-                    db,
-                )
-                watermark = max(watermark, latest)
-                checkpoint_time = max(checkpoint_time, watermark)
-    finally:
-        heartbeat_task.cancel()
+                channel = message.get("channel")
+                if channel == "subscriptionResponse":
+                    print("userFills subscription acknowledged.")
+                elif channel == "error":
+                    print(f"WEBSOCKET SUBSCRIPTION ERROR: {message.get('data')}")
+                elif channel == "userFills":
+                    latest = apply_fills(
+                        process_user_fills_message(message),
+                        positions,
+                        recent_fills,
+                        market_dexes,
+                        paper_trader,
+                        db,
+                    )
+                    watermark = max(watermark, latest)
+                    checkpoint_time = max(checkpoint_time, watermark)
+        finally:
+            heartbeat_task.cancel()
         try:
             await heartbeat_task
         except asyncio.CancelledError:
